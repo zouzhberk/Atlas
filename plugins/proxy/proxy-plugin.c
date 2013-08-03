@@ -127,6 +127,7 @@ typedef int socklen_t;
 
 #include <mysqld_error.h> /** for ER_UNKNOWN_ERROR */
 
+#include <math.h>
 #include <openssl/evp.h>
 
 #include "network-mysqld.h"
@@ -1301,18 +1302,29 @@ void modify_charset(GPtrArray* tokens, network_mysqld_con* con) {
 void check_flags(GPtrArray* tokens, network_mysqld_con* con) {
 	con->is_in_select_calc_found_rows = con->is_insert_id = FALSE;
 
-	if (tokens->len > 2) {
-		sql_token* first_token = tokens->pdata[1];
-		sql_token* second_token = tokens->pdata[2];
-		if (first_token->token_id == TK_SQL_SELECT && strcasecmp(second_token->text->str, "GET_LOCK") == 0) {
-			gchar* key = ((sql_token*)(tokens->pdata[4]))->text->str;
+	sql_token** ts = (sql_token**)(tokens->pdata);
+	guint len = tokens->len;
+
+	if (len > 2) {
+		if (ts[1]->token_id == TK_SQL_SELECT && strcasecmp(ts[2]->text->str, "GET_LOCK") == 0) {
+			gchar* key = ts[4]->text->str;
 			if (!g_hash_table_lookup(con->locks, key)) g_hash_table_add(con->locks, g_strdup(key));
+		}
+
+		if (len > 4) {	//SET AUTOCOMMIT = {0 | 1}
+			if (ts[1]->token_id == TK_SQL_SET && ts[3]->token_id == TK_EQ) {
+				if (strcasecmp(ts[2]->text->str, "AUTOCOMMIT") == 0) {
+					char* str = ts[4]->text->str;
+					if (strcmp(str, "0") == 0) con->is_not_autocommit = TRUE;
+					else if (strcmp(str, "1") == 0) con->is_not_autocommit = FALSE;
+				}
+			}
 		}
 	}
 
-	int i;
-	for (i = 1; i < tokens->len; ++i) {
-		sql_token* token = tokens->pdata[i];
+	guint i;
+	for (i = 1; i < len; ++i) {
+		sql_token* token = ts[i];
 		if (token->token_id == TK_SQL_SQL_CALC_FOUND_ROWS) {
 			con->is_in_select_calc_found_rows = TRUE;
 		} else {
@@ -1334,7 +1346,9 @@ gboolean is_in_blacklist(GPtrArray* tokens) {
 			if (token->token_id == TK_SQL_WHERE) break;
 		}
 		if (i == len) return TRUE;
-	} else if (token->token_id == TK_SQL_SET) {
+	}
+	/*
+	else if (token->token_id == TK_SQL_SET) {
 		if (tokens->len >= 5) {
 			token = tokens->pdata[2];
 			if (strcasecmp(token->text->str, "AUTOCOMMIT") == 0) {
@@ -1343,7 +1357,7 @@ gboolean is_in_blacklist(GPtrArray* tokens) {
 			}
 		}
 	}
-
+	*/
 	for (i = 2; i < len; ++i) {
 		token = tokens->pdata[i];
 		if (token->token_id == TK_OBRACE) {
@@ -1457,7 +1471,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query) {
 			if (con->server == NULL) {
 				int backend_ndx = -1;
 
-				if (!con->is_in_transaction && g_hash_table_size(con->locks) == 0) {
+				if (!con->is_in_transaction && !con->is_not_autocommit && g_hash_table_size(con->locks) == 0) {
 					if (type == COM_QUERY) {
 						backend_ndx = rw_split(tokens, con);
 						//g_mutex_lock(&mutex);
@@ -1743,27 +1757,6 @@ void log_sql(network_mysqld_con* con, injection* inj) {
 
 	fwrite(message->str, message->len, 1, config->sql_log);
 
-	if (latency > config->latency) {
-		FILE* latency_log = config->latency_log;
-		fwrite(message->str, message->len, 1, latency_log);
-
-		guint i, nptrs;
-		void* buffer[100];
-		gchar** strings;
-
-		nptrs = backtrace(buffer, 100);
-		strings = backtrace_symbols(buffer, nptrs);
-
-		if (strings != NULL) {
-			for (i = 0; i < nptrs; ++i) {
-				fwrite(strings[i], strlen(strings[i]), 1, latency_log);
-				fwrite("\n", 1, 1, latency_log);
-			}
-			g_free(strings);
-			fwrite("\n", 1, 1, latency_log);
-		}
-	}
-
 	g_string_free(message, TRUE);
 }
 
@@ -1930,7 +1923,7 @@ NETWORK_MYSQLD_PLUGIN_PROTO(proxy_read_query_result) {
 
 				gboolean have_last_insert_id = inj->qstat.insert_id > 0;
 
-				if (!con->is_in_transaction && !con->is_in_select_calc_found_rows && !have_last_insert_id && g_hash_table_size(con->locks) == 0) network_connection_pool_lua_add_connection(con);
+				if (!con->is_in_transaction && !con->is_not_autocommit && !con->is_in_select_calc_found_rows && !have_last_insert_id && g_hash_table_size(con->locks) == 0) network_connection_pool_lua_add_connection(con);
 
 				++st->injected.sent_resultset;
 				if (st->injected.sent_resultset == 1) {
@@ -2361,8 +2354,6 @@ chassis_plugin_config * network_mysqld_proxy_plugin_new(void) {
 	config->dt_table = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
 	config->pwd_table = g_hash_table_new(g_str_hash, g_str_equal);
 	config->sql_log = NULL;
-	config->latency = G_MAXINT;
-	config->latency_log = NULL;
 	config->charset = NULL;
 
 	//g_mutex_init(&mutex);
@@ -2433,7 +2424,6 @@ void network_mysqld_proxy_plugin_free(chassis_plugin_config *config) {
 	g_hash_table_destroy(config->pwd_table);
 
 	if (config->sql_log) fclose(config->sql_log);
-	if (config->latency_log) fclose(config->latency_log);
 
 	if (config->charset) g_free(config->charset);
 
@@ -2474,8 +2464,6 @@ static GOptionEntry * network_mysqld_proxy_plugin_get_options(chassis_plugin_con
 		{ "tables", 0, 0, G_OPTION_ARG_STRING_ARRAY, NULL, "sub-table settings", NULL },
 	
 		{ "pwds", 0, 0, G_OPTION_ARG_STRING_ARRAY, NULL, "password settings", NULL },
-
-		{ "latency", 0, 0, G_OPTION_ARG_INT, NULL, "", NULL },
 		
 		{ "charset", 0, 0, G_OPTION_ARG_STRING, NULL, "original charset(default: LATIN1)", NULL },
 
@@ -2498,7 +2486,6 @@ static GOptionEntry * network_mysqld_proxy_plugin_get_options(chassis_plugin_con
 	config_entries[i++].arg_data = &(config->lvs_ips);
 	config_entries[i++].arg_data = &(config->tables);
 	config_entries[i++].arg_data = &(config->pwds);
-	config_entries[i++].arg_data = &(config->latency);
 	config_entries[i++].arg_data = &(config->charset);
 
 	return config_entries;
@@ -2576,7 +2563,7 @@ void* check_state(network_backends_t* bs) {
 			mysql_options(&mysql, MYSQL_OPT_CONNECT_TIMEOUT, &tm);
 			mysql_real_connect(&mysql, ip, NULL, NULL, NULL, port, NULL, 0);
 
-			if (mysql_errno(&mysql) == 1045) backend->state = BACKEND_STATE_UP;
+			if (mysql_errno(&mysql) == 1045 || mysql_errno(&mysql) == 0) backend->state = BACKEND_STATE_UP;
 			else backend->state = BACKEND_STATE_DOWN;
 
 			mysql_close(&mysql);
@@ -2729,18 +2716,9 @@ int network_mysqld_proxy_plugin_apply_config(chassis *chas, chassis_plugin_confi
 		}
 	}
 
-	gchar* latency_log_filename = g_strdup_printf("%s/latency_%s.log", chas->log_path, chas->instance_name);
-	config->latency_log = fopen(latency_log_filename, "a");
-	if (config->latency_log == NULL) {
-		g_critical("Failed to open %s", latency_log_filename);
-		g_free(latency_log_filename);
-		return -1; 
-	}
-	g_free(latency_log_filename);
-
 	if (!config->charset) config->charset = g_strdup("LATIN1");
 
-	config->min_idle_connections /= chas->event_thread_count;
+	config->min_idle_connections = ceil(config->min_idle_connections * 1.0 / chas->event_thread_count);
 
 	/* load the script and setup the global tables */
 	network_mysqld_lua_setup_global(chas->priv->sc->L, g, chas);

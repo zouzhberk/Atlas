@@ -929,6 +929,8 @@ infodir
 docdir
 oldincludedir
 includedir
+confdir
+logdir
 localstatedir
 sharedstatedir
 sysconfdir
@@ -1021,6 +1023,8 @@ sharedstatedir='${prefix}/com'
 localstatedir='${prefix}/var'
 includedir='${prefix}/include'
 oldincludedir='/usr/include'
+confdir='${prefix}/conf'
+logdir='${prefix}/log'
 docdir='${datarootdir}/doc/${PACKAGE_TARNAME}'
 infodir='${datarootdir}/info'
 htmldir='${docdir}'
@@ -18382,7 +18386,7 @@ cat >>confdefs.h <<_ACEOF
 _ACEOF
 
 
-ac_config_files="$ac_config_files Makefile cmake/Makefile m4/Makefile src/Makefile plugins/Makefile examples/Makefile lib/Makefile lib/proxy/Makefile"
+ac_config_files="$ac_config_files Makefile m4/Makefile src/Makefile plugins/Makefile examples/Makefile lib/Makefile lib/proxy/Makefile"
 
 
 ac_config_files="$ac_config_files plugins/admin/Makefile"
@@ -18392,15 +18396,6 @@ ac_config_files="$ac_config_files plugins/proxy/Makefile"
 ac_config_files="$ac_config_files plugins/replicant/Makefile"
 
 ac_config_files="$ac_config_files plugins/debug/Makefile"
-
-
-ac_config_files="$ac_config_files scripts/Makefile"
-
-ac_config_files="$ac_config_files scripts/mysql-myisam-dump:scripts/mysql-proxy-binwrapper.in"
-
-ac_config_files="$ac_config_files scripts/mysql-binlog-dump:scripts/mysql-proxy-binwrapper.in"
-
-ac_config_files="$ac_config_files scripts/mysql-proxy:scripts/mysql-proxy-binwrapper.in"
 
 ac_config_files="$ac_config_files mysql-proxy.pc"
 
@@ -19395,7 +19390,6 @@ do
     "depfiles") CONFIG_COMMANDS="$CONFIG_COMMANDS depfiles" ;;
     "libtool") CONFIG_COMMANDS="$CONFIG_COMMANDS libtool" ;;
     "Makefile") CONFIG_FILES="$CONFIG_FILES Makefile" ;;
-    "cmake/Makefile") CONFIG_FILES="$CONFIG_FILES cmake/Makefile" ;;
     "m4/Makefile") CONFIG_FILES="$CONFIG_FILES m4/Makefile" ;;
     "src/Makefile") CONFIG_FILES="$CONFIG_FILES src/Makefile" ;;
     "plugins/Makefile") CONFIG_FILES="$CONFIG_FILES plugins/Makefile" ;;
@@ -19407,10 +19401,6 @@ do
     "plugins/proxy/Makefile") CONFIG_FILES="$CONFIG_FILES plugins/proxy/Makefile" ;;
     "plugins/replicant/Makefile") CONFIG_FILES="$CONFIG_FILES plugins/replicant/Makefile" ;;
     "plugins/debug/Makefile") CONFIG_FILES="$CONFIG_FILES plugins/debug/Makefile" ;;
-    "scripts/Makefile") CONFIG_FILES="$CONFIG_FILES scripts/Makefile" ;;
-    "scripts/mysql-myisam-dump") CONFIG_FILES="$CONFIG_FILES scripts/mysql-myisam-dump:scripts/mysql-proxy-binwrapper.in" ;;
-    "scripts/mysql-binlog-dump") CONFIG_FILES="$CONFIG_FILES scripts/mysql-binlog-dump:scripts/mysql-proxy-binwrapper.in" ;;
-    "scripts/mysql-proxy") CONFIG_FILES="$CONFIG_FILES scripts/mysql-proxy:scripts/mysql-proxy-binwrapper.in" ;;
     "mysql-proxy.pc") CONFIG_FILES="$CONFIG_FILES mysql-proxy.pc" ;;
     "mysql-chassis.pc") CONFIG_FILES="$CONFIG_FILES mysql-chassis.pc" ;;
     "doc/Makefile") CONFIG_FILES="$CONFIG_FILES doc/Makefile" ;;
@@ -20839,9 +20829,6 @@ _LT_EOF
   chmod +x "$ofile"
 
  ;;
-    "scripts/mysql-myisam-dump":F) chmod +x scripts/mysql-myisam-dump ;;
-    "scripts/mysql-binlog-dump":F) chmod +x scripts/mysql-binlog-dump ;;
-    "scripts/mysql-proxy":F) chmod +x scripts/mysql-proxy ;;
 
   esac
 done # for ac_tag
